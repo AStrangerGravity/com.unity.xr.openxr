@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
+using UnityEngine.XR.OpenXR;
 using UnityEngine.XR.OpenXR.Features;
 using UnityEngine.XR.OpenXR.Features.Mock;
 using UnityEngine.TestTools;
@@ -12,6 +13,37 @@ namespace UnityEngine.XR.OpenXR.Tests
 {
     internal class OpenXRRuntimeTests : OpenXRLoaderSetup
     {
+        [Test]
+        public void TestAvailableExtensions()
+        {
+            // This test verifies that the list of available extensions contains a subset of known extensions.
+            // If certain known extensions are removed from the mock this test should reflect that.
+            base.InitializeAndStart();
+            string[] extensions = OpenXRRuntime.GetAvailableExtensions();
+            HashSet<string> extensionsSet = new HashSet<string>(extensions);
+
+            List<string> expectedExtensions = new List<string>()
+            {
+                "XR_UNITY_mock_test",
+                "XR_UNITY_null_gfx",
+                "XR_KHR_visibility_mask",
+                "XR_EXT_conformance_automation",
+                "XR_KHR_composition_layer_depth",
+                "XR_VARJO_quad_views",
+                "XR_MSFT_secondary_view_configuration",
+                "XR_EXT_eye_gaze_interaction",
+                "XR_MSFT_hand_interaction",
+                "XR_MSFT_first_person_observer"
+            };
+
+            foreach (string expectedExtension in expectedExtensions)
+            {
+                Assert.IsTrue(extensionsSet.Contains(expectedExtension));
+            }
+
+            base.StopAndShutdown();
+        }
+
         [UnityTest]
         public IEnumerator SystemIdRetrieved()
         {
@@ -210,10 +242,10 @@ namespace UnityEngine.XR.OpenXR.Tests
                 nameof(OpenXRFeature.OnSystemChange),
                 nameof(OpenXRFeature.OnSubsystemCreate),
                 nameof(OpenXRFeature.OnSessionCreate),
-                nameof(OpenXRFeature.OnSessionBegin),
                 nameof(OpenXRFeature.OnFormFactorChange),
                 nameof(OpenXRFeature.OnEnvironmentBlendModeChange),
                 nameof(OpenXRFeature.OnViewConfigurationTypeChange),
+                nameof(OpenXRFeature.OnSessionBegin),
                 nameof(OpenXRFeature.OnAppSpaceChange),
                 nameof(OpenXRFeature.OnSubsystemStart),
                 nameof(OpenXRFeature.OnSubsystemStop),
@@ -225,6 +257,80 @@ namespace UnityEngine.XR.OpenXR.Tests
             };
 
             Assert.AreEqual(expectedCallbackOrder, callbackQueue);
+        }
+
+        [UnityTest]
+        public IEnumerator TestConsistentFeatureValues()
+        {
+            HashSet<string> methodsUsingSession = new HashSet<string>()
+            {
+                "OnSessionCreate",
+                "OnSessionBegin",
+                "OnSessionEnd",
+                "OnSessionDestroy",
+                "OnSessionLossPending",
+                "OnSessionExiting"
+            };
+
+            HashSet<string> methodsUsingInstance = new HashSet<string>()
+            {
+                "OnInstanceCreate",
+                "OnInstanceDestroy"
+            };
+
+            Dictionary<string, ulong> methodToSessionValue = new Dictionary<string, ulong>();
+            Dictionary<string, ulong> methodToInstanceValue = new Dictionary<string, ulong>();
+
+            MockRuntime.Instance.TestCallback = (methodName, param) =>
+            {
+                if (methodsUsingSession.Contains(methodName))
+                {
+                    Assert.IsFalse(methodToSessionValue.ContainsKey(methodName));
+                    methodToSessionValue[methodName] = (ulong)param;
+                }
+                else if (methodsUsingInstance.Contains(methodName))
+                {
+                    Assert.IsFalse(methodToInstanceValue.ContainsKey(methodName));
+                    methodToInstanceValue[methodName] = (ulong)param;
+                }
+
+                return true;
+            };
+
+            base.InitializeAndStart();
+            yield return null;
+            base.StopAndShutdown();
+            yield return null;
+
+            ulong? sessionValue = null;
+            ulong? instanceValue = null;
+
+            foreach (var pair in methodToSessionValue)
+            {
+                if (sessionValue.HasValue)
+                {
+                    Assert.AreEqual(sessionValue, pair.Value);
+                }
+                else
+                {
+                    sessionValue = pair.Value;
+                }
+            }
+
+            foreach (var pair in methodToInstanceValue)
+            {
+                if (instanceValue.HasValue)
+                {
+                    Assert.AreEqual(instanceValue, pair.Value);
+                }
+                else
+                {
+                    instanceValue = pair.Value;
+                }
+            }
+
+            Assert.IsTrue(sessionValue.HasValue);
+            Assert.IsTrue(instanceValue.HasValue);
         }
 
         [UnityTest]
@@ -313,6 +419,7 @@ namespace UnityEngine.XR.OpenXR.Tests
         };
 
         [UnityTest]
+        [UnityPlatform(exclude=new[] {RuntimePlatform.Android})] // Vulkan doesn't have depth on earlier versions of unity
         public IEnumerator CheckDepthSubmissionMode([ValueSource("depthModes")] OpenXRSettings.DepthSubmissionMode depthMode)
         {
             base.InitializeAndStart();
@@ -362,31 +469,6 @@ namespace UnityEngine.XR.OpenXR.Tests
             Assert.IsTrue(containsMockExt);
         }
 
-
-        [UnityTest]
-        public IEnumerator CheckDisplayRestartAfterStopSendRestartEvent()
-        {
-            // Initialize and make sure the frame loop is running
-            InitializeAndStart();
-            yield return new WaitForXrFrame();
-
-            // Stop the session and make sure xrEndSession is called
-            var endSessionCalled = false;
-            MockRuntime.SetFunctionCallback("xrEndSession", (func, result) => endSessionCalled = true);
-
-            Stop();
-
-            Assert.IsTrue(endSessionCalled);
-
-            // Restart the display subsystem which should force a restart
-            loader.displaySubsystem.Start();
-
-            // Wait for the restart to finish and then wait for a single Xr Frame, if things restarted
-            // properly then the frame loop should be back up and running
-            yield return new WaitForLoaderRestart();
-            yield return new WaitForXrFrame();
-        }
-
         [UnityTest]
         public IEnumerator SimulatePause ()
         {
@@ -394,17 +476,32 @@ namespace UnityEngine.XR.OpenXR.Tests
             InitializeAndStart();
             yield return new WaitForXrFrame();
 
-            // Pause..
+            // Pause will stop the loaders directly
             loader.displaySubsystem.Stop();
             loader.inputSubsystem.Stop();
 
             yield return null;
+
+            // Runtime will transition to idle
+            MockRuntime.TransitionToState(XrSessionState.Visible, false);
+            yield return null;
+            MockRuntime.TransitionToState(XrSessionState.Synchronized, false);
+            yield return null;
+            MockRuntime.TransitionToState(XrSessionState.Stopping, false);
+            yield return null;
+            MockRuntime.TransitionToState(XrSessionState.Idle, false);
             yield return null;
 
-            // Unpause
+            yield return null;
+
+            // Unpause will start the loaders directly
             loader.displaySubsystem.Start();
             loader.inputSubsystem.Start();
 
+            yield return null;
+
+            // And then transition to ready
+            MockRuntime.TransitionToState(XrSessionState.Ready, false);
             yield return new WaitForXrFrame();
         }
 
@@ -442,7 +539,7 @@ namespace UnityEngine.XR.OpenXR.Tests
 
             MockRuntime.TransitionToState(XrSessionState.Visible, true);
 
-            // State transition doesnt happen immediately so make doubly sure it has happened before we try to get the new feature value
+            // State transition doesn't happen immediately so make doubly sure it has happened before we try to get the new feature value
             yield return new WaitForXrFrame(2);
 
             hasValue = hmdDevices[0].TryGetFeatureValue(CommonUsages.userPresence, out isUserPresent);
@@ -450,6 +547,7 @@ namespace UnityEngine.XR.OpenXR.Tests
             Assert.That(isUserPresent, Is.False);
         }
 
+#if ENABLE_VR
         [UnityTest]
         public IEnumerator RefreshRate()
         {
@@ -462,6 +560,7 @@ namespace UnityEngine.XR.OpenXR.Tests
 
             Assert.That(XRDevice.refreshRate, Is.EqualTo(60.0f).Within(0.01f));
         }
+#endif
 
         [UnityTest]
         [UnityPlatform(RuntimePlatform.WindowsEditor, RuntimePlatform.WindowsPlayer)]
@@ -559,6 +658,8 @@ namespace UnityEngine.XR.OpenXR.Tests
         [UnityTest]
         public IEnumerator FirstPersonObserver()
         {
+            AddExtension("XR_MSFT_secondary_view_configuration");
+            AddExtension("XR_MSFT_first_person_observer");
             base.InitializeAndStart();
 
             MockRuntime.ActivateSecondaryView(XrViewConfigurationType.SecondaryMonoFirstPersonObserver, true);
@@ -576,9 +677,34 @@ namespace UnityEngine.XR.OpenXR.Tests
             Assert.IsTrue(secondaryLayerCount == 0);
         }
 
+
+        [UnityTest]
+        public IEnumerator ThirdPersonObserver()
+        {
+            AddExtension("XR_MSFT_secondary_view_configuration");
+            AddExtension("XR_MSFT_third_person_observer_private");
+            base.InitializeAndStart();
+
+            MockRuntime.ActivateSecondaryView(XrViewConfigurationType.SecondaryMonoThirdPersonObserver, true);
+
+            yield return new WaitForXrFrame(2);
+
+            MockRuntime.GetEndFrameStats(out var primaryLayerCount, out var secondaryLayerCount);
+            Assert.IsTrue(secondaryLayerCount == 1);
+
+            MockRuntime.ActivateSecondaryView(XrViewConfigurationType.SecondaryMonoThirdPersonObserver, false);
+
+            yield return new WaitForXrFrame(2);
+
+            MockRuntime.GetEndFrameStats(out primaryLayerCount, out secondaryLayerCount);
+            Assert.IsTrue(secondaryLayerCount == 0);
+        }
+
         [UnityTest]
         public IEnumerator FirstPersonObserverRestartWhileActive()
         {
+            AddExtension("XR_MSFT_secondary_view_configuration");
+            AddExtension("XR_MSFT_first_person_observer");
             base.InitializeAndStart();
 
             MockRuntime.ActivateSecondaryView(XrViewConfigurationType.SecondaryMonoFirstPersonObserver, true);
@@ -626,6 +752,24 @@ namespace UnityEngine.XR.OpenXR.Tests
         }
 
         [UnityTest]
+        public IEnumerator VarjoQuadViews()
+        {
+            AddExtension("XR_VARJO_quad_views");
+            OpenXRSettings.Instance.renderMode = OpenXRSettings.RenderMode.MultiPass;
+            base.InitializeAndStart();
+            yield return null;
+            yield return null;
+            Assert.AreEqual(4, loader.displaySubsystem.GetRenderPassCount());
+
+            OpenXRSettings.Instance.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
+            yield return null;
+            yield return null;
+            Assert.AreEqual(3, loader.displaySubsystem.GetRenderPassCount());
+
+            base.StopAndShutdown();
+        }
+
+        [UnityTest]
         public IEnumerator NullFeature()
         {
             // Insert a null entry into the features list
@@ -665,6 +809,91 @@ namespace UnityEngine.XR.OpenXR.Tests
 
             // The static instance should not be set if initialize failed
             Assert.IsTrue(OpenXRLoaderBase.Instance == null);
+        }
+
+        [UnityTest]
+        public IEnumerator RestartLoopTest()
+        {
+            float initialTimeBetweenRestarts = OpenXRRestarter.TimeBetweenRestartAttempts;
+            bool initialKeepFunctionCallbacks = MockRuntime.KeepFunctionCallbacks;
+            var initialXRGetSystemCallback = MockRuntime.GetBeforeFunctionCallback("xrGetSystem");
+            try
+            {
+                MockRuntime.KeepFunctionCallbacks = true;
+                float timeBetweenRestarts = 0.5f;
+
+                yield return null;
+
+                // Reduce the time between restarts to reduce the time of this test.
+                OpenXRRestarter.TimeBetweenRestartAttempts = timeBetweenRestarts;
+
+                int resetAttempts = 0;
+                MockRuntime.SetFunctionCallback("xrGetSystem", (name) =>
+                {
+                    MockRuntime.KeepFunctionCallbacks = true;
+                    resetAttempts += 1;
+                    if (resetAttempts <= 2)
+                    {
+                        return XrResult.FormFactorUnavailable;
+                    }
+                    else
+                    {
+                        return XrResult.Success;
+                    }
+                });
+
+                // Trigger initialize, which should throw an error from xrGetSystem,
+                // This will trigger a restart, which should trigger another error from xrGetSystem,
+                // Which should trigger another restart, etc. until xrGetSystem returns a success.
+                LogAssert.ignoreFailingMessages = true;
+                base.InitializeAndStart();
+
+                yield return new WaitForLoaderRestart(10, true);
+                Assert.AreEqual(3, resetAttempts);
+            }
+            finally
+            {
+                MockRuntime.KeepFunctionCallbacks = initialKeepFunctionCallbacks;
+                MockRuntime.SetFunctionCallback("xrGetSystem", initialXRGetSystemCallback);
+                OpenXRRestarter.TimeBetweenRestartAttempts = initialTimeBetweenRestarts;
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator RestartLoopDisabledTest()
+        {
+            OpenXRRuntime.wantsToRestart += () => false;
+            OpenXRRuntime.wantsToQuit += () => true;
+            float initialTimeBetweenRestarts = OpenXRRestarter.TimeBetweenRestartAttempts;
+            var initialXRGetSystemCallback = MockRuntime.GetBeforeFunctionCallback("xrGetSystem");
+            try
+            {
+                float timeBetweenRestarts = 1.0f;
+
+                yield return null;
+
+                // Should have 0 restart attempts before starting.
+                Debug.Log("Restart Attempts:" + OpenXRRestarter.PauseAndRestartAttempts.ToString());
+                Assert.AreEqual(0, OpenXRRestarter.PauseAndRestartAttempts);
+
+                // Reduce the time between restarts to reduce the time of this test.
+                OpenXRRestarter.TimeBetweenRestartAttempts = timeBetweenRestarts;
+
+                // Trigger initialize, which should throw the form factor unavailable error.
+                MockRuntime.SetFunctionCallback("xrGetSystem", (name) => XrResult.FormFactorUnavailable);
+                base.InitializeAndStart();
+
+                // This retry attempt should not succeed since we manually set wantsToRestart = false.
+                yield return new WaitForLoaderShutdown();
+                Assert.IsTrue(OpenXRLoader.Instance == null, "OpenXR should not be initialized");
+            }
+            finally
+            {
+                OpenXRRestarter.TimeBetweenRestartAttempts = initialTimeBetweenRestarts;
+                OpenXRRuntime.wantsToRestart -= () => false;
+                OpenXRRuntime.wantsToQuit -= () => true;
+                MockRuntime.SetFunctionCallback("xrGetSystem", initialXRGetSystemCallback);
+            }
         }
 
         [UnityTest]
@@ -779,7 +1008,34 @@ namespace UnityEngine.XR.OpenXR.Tests
         }
 
         [UnityTest]
-        public IEnumerator CreateSessionRuntimeError ()
+        public IEnumerator CreateSwapChainSessionLostError()
+        {
+            float initialTimeBetweenRestarts = OpenXRRestarter.TimeBetweenRestartAttempts;
+            var initialXRCreateSwapchainCallback = MockRuntime.GetBeforeFunctionCallback("xrCreateSwapchain");
+            try
+            {
+                float timeBetweenRestarts = 1.0f;
+
+                // Reduce the time between restarts to reduce the time of this test.
+                OpenXRRestarter.TimeBetweenRestartAttempts = timeBetweenRestarts;
+
+                MockRuntime.SetFunctionCallback("xrCreateSwapchain", (func) => XrResult.SessionLost);
+                LogAssert.Expect(LogType.Log, "OpenXRLoader restart successful.");
+                InitializeAndStart();
+
+                yield return new WaitForLoaderRestart(10, true);
+
+                Assert.IsTrue(OpenXRLoader.Instance != null, "OpenXR should be initialized");
+            }
+            finally
+            {
+                OpenXRRestarter.TimeBetweenRestartAttempts = initialTimeBetweenRestarts;
+                MockRuntime.SetFunctionCallback("xrCreateSwapchain", initialXRCreateSwapchainCallback);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator CreateSessionRuntimeFailure ()
         {
             MockRuntime.SetFunctionCallback("xrCreateSession", (func) => XrResult.RuntimeFailure);
 
@@ -789,6 +1045,23 @@ namespace UnityEngine.XR.OpenXR.Tests
 
             Assert.IsTrue(DoesDiagnosticReportContain(new System.Text.RegularExpressions.Regex(@"xrCreateSession: XR_ERROR_RUNTIME_FAILURE")));
             Assert.IsTrue(OpenXRLoader.Instance.currentLoaderState == OpenXRLoaderBase.LoaderState.Stopped, "OpenXR should be stopped");
+        }
+
+        [UnityTest]
+        public IEnumerator EndFrameRuntimeFailure ()
+        {
+            InitializeAndStart();
+
+            yield return new WaitForXrFrame(2);
+
+            MockRuntime.SetFunctionCallback("xrEndFrame", (func) => XrResult.RuntimeFailure);
+
+            yield return null;
+            yield return null;
+            yield return null;
+
+            Assert.IsTrue(DoesDiagnosticReportContain(new System.Text.RegularExpressions.Regex(@"xrEndFrame: XR_ERROR_RUNTIME_FAILURE")));
+            Assert.IsTrue(OpenXRLoader.Instance == null, "OpenXR should be shutdown");
         }
 
         [UnityTest]

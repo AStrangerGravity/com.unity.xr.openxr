@@ -1,9 +1,9 @@
 using System.Collections.Generic;
+using UnityEngine.InputSystem.Controls;
+using UnityEngine.InputSystem.Layouts;
+using UnityEngine.InputSystem.XR;
 using UnityEngine.Scripting;
 using UnityEngine.XR.OpenXR.Input;
-using UnityEngine.InputSystem.Layouts;
-using UnityEngine.InputSystem.Controls;
-using UnityEngine.InputSystem.XR;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -48,13 +48,13 @@ namespace UnityEngine.XR.OpenXR.Features.Interactions
             public AxisControl select { get; private set; }
 
             /// <summary>
-            /// A [ButtonControl](xref:UnityEngine.InputSystem.Controls.ButtonControl) that represents the <see cref="MicrosoftHandInteraction.trigger"/> OpenXR binding.
+            /// A [ButtonControl](xref:UnityEngine.InputSystem.Controls.ButtonControl) that represents the <see cref="MicrosoftHandInteraction.select"/> OpenXR binding.
             /// </summary>
             [Preserve, InputControl(aliases = new[] { "Primary", "selectbutton" }, usages = new[] { "PrimaryButton" })]
             public ButtonControl selectPressed { get; private set; }
 
             /// <summary>
-            /// An [AxisControl](xref:UnityEngine.InputSystem.Controls.AxisControl) that represents the <see cref="MicrosoftHandInteraction.select"/> OpenXR binding.
+            /// An [AxisControl](xref:UnityEngine.InputSystem.Controls.AxisControl) that represents the <see cref="MicrosoftHandInteraction.squeeze"/> OpenXR binding.
             /// </summary>
             [Preserve, InputControl(alias = "Secondary", usage = "Grip")]
             public AxisControl squeeze { get; private set; }
@@ -166,10 +166,14 @@ namespace UnityEngine.XR.OpenXR.Features.Interactions
         private const string kDeviceLocalizedName = "HoloLens Hand OpenXR";
 
         /// <summary>
-        /// Registers the <see cref="Hand"/> layout with the Input System.
+        /// Registers the <see cref="HoloLensHand"/> layout with the Input System.
         /// </summary>
         protected override void RegisterDeviceLayout()
         {
+#if UNITY_EDITOR
+            if (!OpenXRLoaderEnabledForEditorPlayMode())
+                return;
+#endif
             InputSystem.InputSystem.RegisterLayout(typeof(HoloLensHand),
                         matches: new InputDeviceMatcher()
                         .WithInterface(XRUtilities.InterfaceMatchAnyVersion)
@@ -177,10 +181,14 @@ namespace UnityEngine.XR.OpenXR.Features.Interactions
         }
 
         /// <summary>
-        /// Removes the <see cref="Hand"/> layout from the Input System.
+        /// Removes the <see cref="HoloLensHand"/> layout from the Input System.
         /// </summary>
         protected override void UnregisterDeviceLayout()
         {
+#if UNITY_EDITOR
+            if (!OpenXRLoaderEnabledForEditorPlayMode())
+                return;
+#endif
             InputSystem.InputSystem.RemoveLayout(nameof(HoloLensHand));
         }
 

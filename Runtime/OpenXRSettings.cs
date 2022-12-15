@@ -20,6 +20,10 @@ namespace UnityEngine.XR.OpenXR
         /// <typeparam name="T">Feature type</typeparam>
         /// <returns>All known features of the given type within the package settings</returns>
         public IEnumerable<(BuildTargetGroup buildTargetGroup, T feature)> GetFeatures<T>() where T : OpenXRFeature;
+
+        internal void RefreshFeatureSets();
+
+        internal string PackageSettingsAssetPath();
     }
 #endif
 
@@ -31,12 +35,7 @@ namespace UnityEngine.XR.OpenXR
     public partial class OpenXRSettings : ScriptableObject
     {
 #if UNITY_EDITOR
-        /// <summary>
-        /// Used to store version of the package the last time play mode was entered. This is stored
-        /// in the settings because here it will properly survive a domain reload which is necessary
-        /// since a domain reload is issued each time play is pressed.
-        /// </summary>
-        internal string lastPlayVersion = null;
+        internal bool versionChanged = false;
 #else
         private static OpenXRSettings s_RuntimeInstance = null;
 

@@ -4,6 +4,69 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2022-09-18
+### Fixed
+* Fixed `XRInputSubsystem.TryGetBoundaryPoints` returning inaccurate values. If you have guardian/boundary setup in the headset, `TryGetBoundaryPoints` will return a List<Vector3> of size 4 representing the four vertices of the Play Area rectangle, which is centered at the origin and edges corresponding to the X and Z axes of the provided space. Not all systems or spaces may support boundaries.
+* Fixed an issue that controllers position not getting updated and stuck to the floor level when Oculus Integration Asset installed in the project.
+* Fixed an issue that OpenXR libraries were included in build when OpenXR SDK is not enabled.
+* Improved domain reload performance by removing unnecessary checks when entering Playmode.
+
+### Updated
+* Updated Input System dependency to 1.4.2.
+
+### Added
+* Added support for Android cross-vendor loader.
+
+## [1.5.1] - 2022-08-11
+### Fixed
+* Fixed compilation errors on Game Core platforms where `ENABLE_VR` is not currently defined. Requires Input System 1.4.0 or newer.
+* Fixed an issue that was causing Oculus Android Vulkan builds rendering broken after sleep / awake HMD.
+* Fixed Oculus controllers tracking issues when both OpenXR package and Oculus package are installed in the project.
+* Fixed an issue in Play Mode OpenXR Runtime selection that `Other` option would be reverted to `System Default` after entering and exiting playmode.
+* Fixed a bug in `XR_VARJO_quad_views` support.
+
+### Updated
+* Updated Oculus Android manifest with focusAware, supportedDevices and headTracking tags added. Also added a new validation rule to check if Oculus target devices are selected.
+* Updated OpenXR Loader to 1.0.23.
+* Updated Input System dependency to 1.4.1.
+
+### Added
+* Added generic Project Validation status in the **Project Settings** window under **XR Plug-in Management** if you have [XR Core Utilities](https://docs.unity3d.com/Packages/com.unity.xr.core-utils@latest) 2.1.0 or later installed. These results include the checks for all XR plug-ins that provide validation rules.
+* Added API `OpenXRFeature.SetEnvironmentBlendMode` to set the current XR Environment Blend Mode if it is supported by the active runtime. If not supported, fall back  to the runtime preference.
+* Added API `OpenXRFeature.GetEnvironmentBlendMode` to return the current XR Environment Blend Mode.
+* Added support for `XR_MSFT_holographic_windown_attachment` extension on UWP so that installing Microsoft Mixed Reality OpenXR Plug-in is no longer required if targeting HoloLens V2 devices. And removed corresponding project validator. 
+* Added support for `XR_FB_foveation`, `XR_FB_foveation_configuration`, `XR_FB_swapchain_update_state`, `XR_FB_foveation_vulkan` and `XR_FB_space_warp` extensions.
+* Added ability to recover the application after Oculus Link was aborted and re-established. Attempt to restart every 5 seconds after Link disconnected.
+* Added validation rule for duplicate settings in OpenXRPackageSettings.asset.
+
+## [1.4.2] - 2022-05-12
+### Fixed
+* Fixed unnecessary destroying session on pause and resume.
+
+## [1.4.1] - 2022-04-13
+### Fixed
+* Fixed an issue that would cause failure to load OpenXR loader when non-ascii characters in project path.
+* Fixed an editor crash issue when updating OpenXR package version and then enter Playmode.
+* Fixed `EyeGaze` functionality not working in the `Controller` sample.
+* Fixed Oculus `MenuButton` not being recognized in script.
+* Fixed an issue that some OpenXR Editor settings not being serialized properly.
+* Fixed `Failed to suggest bindings for interaction profile` console error spamming when a runtime doesn't support a certain interaction profile.
+
+### Updated
+* Updated OpenXR Loader to 1.0.20.
+* Updated Render Mode naming to Single Pass Instanced / Multiview for Android platform.
+* Updated Input System dependency to 1.3.0.
+* Updated XR mirror view to be based on the occlusion mesh line loop data obtained from `xrGetVisibilityMaskKHR`.
+
+### Added
+* Added runtime failures handling to completely shut down OpenXR when runtime error occurred.
+* Added support to dynamically discover runtimes by registry key.
+* Added logging for no MainCamera tag detected when depthSubmission mode enabled.
+* Added console error logging if entering playmode on unsupported platforms.
+* Added support to automatically open OpenXR project validator if any issues detected after package update.
+* Added API `OpenXRFeature.GetViewConfigurationTypeForRenderPass`, which returns viewConfigurationType for the given renderPass index.
+* Added pre-init support for UWP / WSA platform. Note: OpenXR got unchecked by upgrading to this version (only on UWP), but options chosen under `Features` remained as they were.
+
 ## [1.3.1] - 2021-11-17
 ### Fixed
 * Fixed an issue in `OpenXRRestarter` that would prevent a subsequent restart.

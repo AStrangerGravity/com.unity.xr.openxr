@@ -1,5 +1,5 @@
-using System.Linq;
 using System;
+using System.Reflection;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.InputSystem.Utilities;
 using UnityEngine.XR.OpenXR.Input;
-
+using UnityEngine.XR.OpenXR.NativeTypes;
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.XR.OpenXR;
@@ -114,6 +114,12 @@ namespace UnityEngine.XR.OpenXR.Features
         /// True if the feature is required, false otherwise.
         /// </summary>
         [HideInInspector] [SerializeField] internal bool required = false;
+
+        /// <summary>
+        /// Set to true if the internal fields have been updated in the current domain
+        /// </summary>
+        [NonSerialized]
+        internal bool internalFieldsUpdated = false;
 
         /// <summary>
         /// Accessor for xrGetInstanceProcAddr function pointer.
@@ -244,7 +250,7 @@ namespace UnityEngine.XR.OpenXR.Features
         /// Notification to the feature implementer that the environment blend mode has changed.
         /// </summary>
         /// <param name="xrEnvironmentBlendMode">New environment blend mode value</param>
-        protected internal virtual void OnEnvironmentBlendModeChange (int xrEnvironmentBlendMode) {}
+        protected internal virtual void OnEnvironmentBlendModeChange (XrEnvironmentBlendMode xrEnvironmentBlendMode) {}
 
         /// <summary>
         /// Called when the enabled state of a feature changes
@@ -291,6 +297,28 @@ namespace UnityEngine.XR.OpenXR.Features
         /// <returns>Current app space</returns>
         protected static ulong GetCurrentAppSpace() =>
             Internal_GetAppSpace(out ulong appSpaceId) ? appSpaceId : 0ul;
+
+        /// <summary>
+        /// Returns viewConfigurationType for the given renderPass index.
+        /// </summary>
+        /// <param name="renderPassIndex">RenderPass index</param>
+        /// <returns>viewConfigurationType for certain renderPass. Return 0 if invalid renderPass.</returns>
+        protected static int GetViewConfigurationTypeForRenderPass(int renderPassIndex) =>
+            Internal_GetViewTypeFromRenderIndex(renderPassIndex);
+
+        /// <summary>
+        /// Set the current XR Environment Blend Mode if it is supported by the active runtime. If not supported, fall back to the runtime preference.
+        /// </summary>
+        /// <param name="xrEnvironmentBlendMode">Environment Blend Mode (e.g.: Opaque = 1, Additive = 2, AlphaBlend = 3)</param>
+        protected static void SetEnvironmentBlendMode(XrEnvironmentBlendMode xrEnvironmentBlendMode) =>
+            Internal_SetEnvironmentBlendMode(xrEnvironmentBlendMode);
+
+        /// <summary>
+        /// Returns the current XR Environment Blend Mode.
+        /// </summary>
+        /// <returns>Current XR Environment Blend Mode</returns>
+        protected static XrEnvironmentBlendMode GetEnvironmentBlendMode() =>
+            Internal_GetEnvironmentBlendMode();
 
 #if UNITY_EDITOR
         /// <summary>
@@ -361,6 +389,8 @@ namespace UnityEngine.XR.OpenXR.Features
             public string helpLink;
 
             internal OpenXRFeature feature;
+
+            internal BuildTargetGroup buildTargetGroup = BuildTargetGroup.Unknown;
         }
 
         /// <summary>
@@ -371,6 +401,26 @@ namespace UnityEngine.XR.OpenXR.Features
         /// <param name="targetGroup">Build target group these validation rules will be evaluated for.</param>
         protected internal virtual void GetValidationChecks(List<ValidationRule> rules, BuildTargetGroup targetGroup)
         {
+        }
+
+        internal static void GetFullValidationList(List<ValidationRule> rules, BuildTargetGroup targetGroup)
+        {
+            var openXrSettings = OpenXRSettings.GetSettingsForBuildTargetGroup(targetGroup);
+            if (openXrSettings == null)
+            {
+                return;
+            }
+
+            var tempList = new List<ValidationRule>();
+            foreach (var feature in openXrSettings.features)
+            {
+                if (feature != null)
+                {
+                    feature.GetValidationChecks(tempList, targetGroup);
+                    rules.AddRange(tempList);
+                    tempList.Clear();
+                }
+            }
         }
 
         internal static void GetValidationList(List<ValidationRule> rules, BuildTargetGroup targetGroup)
@@ -468,22 +518,6 @@ namespace UnityEngine.XR.OpenXR.Features
         /// <inheritdoc />
         protected virtual void OnEnable()
         {
-#if UNITY_EDITOR
-            foreach (Attribute attr in Attribute.GetCustomAttributes(GetType()))
-            {
-                if (attr is UnityEditor.XR.OpenXR.Features.OpenXRFeatureAttribute)
-                {
-                    var feature = (UnityEditor.XR.OpenXR.Features.OpenXRFeatureAttribute) attr;
-                    nameUi = feature.UiName;
-                    version = feature.Version;
-                    featureIdInternal = feature.FeatureId;
-                    openxrExtensionStrings = feature.OpenxrExtensionStrings;
-                    priority = feature.Priority;
-                    required = feature.Required;
-                    company = feature.Company;
-                }
-            }
-#endif
         }
 
         /// <inheritdoc />
@@ -564,6 +598,7 @@ namespace UnityEngine.XR.OpenXR.Features
             XrLossPending,
             XrInstanceLossPending,
             XrRestartRequested,
+            XrRequestRestartLoop,
         };
 
         internal static void ReceiveNativeEvent(NativeEvent e, ulong payload)

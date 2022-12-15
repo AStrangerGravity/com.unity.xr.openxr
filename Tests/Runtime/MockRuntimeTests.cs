@@ -222,7 +222,7 @@ namespace UnityEngine.XR.OpenXR.Tests
             {
                 if (methodName == nameof(OpenXRFeature.OnInstanceCreate))
                 {
-                    MockRuntime.SetEnvironmentBlendMode(XrEnvironmentBlendMode.Additive);
+                    MockRuntime.ChooseEnvironmentBlendMode(XrEnvironmentBlendMode.Additive);
                 }
 
                 return true;
@@ -245,6 +245,28 @@ namespace UnityEngine.XR.OpenXR.Tests
             var displays = new List<XRDisplaySubsystem>();
             SubsystemManager.GetInstances(displays);
             Assert.AreEqual(true, displays[0].displayOpaque);
+        }
+
+        [UnityTest]
+        public IEnumerator MultipleEnvironmentBlendModes()
+        {
+            //Mock available environmentBlendModes are Opaque and Additive in mock_runtime.cpp EnumerateEnvironmentBlendModes.
+            AddExtension(MockRuntime.XR_UNITY_mock_test);
+            base.InitializeAndStart();
+            yield return null;
+
+            //check default mode is Opaque.
+            Assert.AreEqual(XrEnvironmentBlendMode.Opaque, MockRuntime.GetXrEnvironmentBlendMode());
+
+            //Switch to another supported mode - Additive.
+            MockRuntime.ChooseEnvironmentBlendMode(XrEnvironmentBlendMode.Additive);
+            yield return new WaitForXrFrame(2);
+            Assert.AreEqual(XrEnvironmentBlendMode.Additive, MockRuntime.GetXrEnvironmentBlendMode());
+
+            //Set to unsupported mode - Alpha_blend
+            MockRuntime.ChooseEnvironmentBlendMode(XrEnvironmentBlendMode.AlphaBlend);
+            yield return new WaitForXrFrame(2);
+            Assert.AreNotEqual(XrEnvironmentBlendMode.AlphaBlend, MockRuntime.GetXrEnvironmentBlendMode());
         }
 
         [UnityTest]
@@ -275,10 +297,10 @@ namespace UnityEngine.XR.OpenXR.Tests
 
             var comparer = new Vector3EqualityComparer(10e-6f);
 
-            Assert.That(points[0], Is.EqualTo(new Vector3 {x = -1.0f, y = 0.0f, z = -3.0f}).Using(comparer));
-            Assert.That(points[1], Is.EqualTo(new Vector3 {x = -1.0f, y = 0.0f, z = 3.0f}).Using(comparer));
-            Assert.That(points[2], Is.EqualTo(new Vector3 {x = 1.0f, y = 0.0f, z = 3.0f}).Using(comparer));
-            Assert.That(points[3], Is.EqualTo(new Vector3 {x = 1.0f, y = 0.0f, z = -3.0f}).Using(comparer));
+            Assert.That(points[0], Is.EqualTo(new Vector3 {x = -0.5f, y = 0.0f, z = -1.5f}).Using(comparer));
+            Assert.That(points[1], Is.EqualTo(new Vector3 {x = -0.5f, y = 0.0f, z = 1.5f}).Using(comparer));
+            Assert.That(points[2], Is.EqualTo(new Vector3 {x = 0.5f, y = 0.0f, z = 1.5f}).Using(comparer));
+            Assert.That(points[3], Is.EqualTo(new Vector3 {x = 0.5f, y = 0.0f, z = -1.5f}).Using(comparer));
         }
 
         [UnityTest]
