@@ -240,6 +240,15 @@ namespace UnityEngine.XR.OpenXR
             if (OpenXRFeature.requiredFeatureFailed)
                 return false;
 
+            // (ASG) We enable this loader together with the Oculus Loader, so if we find an Oculus XR runtime then we
+            // stop initializing this loader, return a failure, and fall back to the Oculus Loader.
+            string runtimeName = OpenXRRuntime.name;
+            Debug.Log($"(OpenXRLoader) Runtime name: {runtimeName}");
+            if (runtimeName != null && runtimeName.Contains("oculus", StringComparison.InvariantCultureIgnoreCase))
+            {
+                return false;
+            }
+
             OpenXRAnalytics.SendInitializeEvent(true);
 
             OpenXRFeature.ReceiveLoaderEvent(this, OpenXRFeature.LoaderEvent.SubsystemCreate);
