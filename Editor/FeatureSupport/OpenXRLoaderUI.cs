@@ -38,7 +38,7 @@ namespace UnityEditor.XR.OpenXR.Features
 
         public string[] IncompatibleLoaders => new string[] {
             "UnityEngine.XR.WindowsMR.WindowsMRLoader",
-            "Unity.XR.Oculus.OculusLoader",
+            // "Unity.XR.Oculus.OculusLoader", // (ASG) Removed to allow building with both Oculus and OpenXR loaders for Desktop
             };
 
         /// <inheritdoc/>
