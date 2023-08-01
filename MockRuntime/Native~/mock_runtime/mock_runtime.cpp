@@ -35,7 +35,7 @@ MockRuntime::MockRuntime(XrInstance instance, MockRuntimeCreateFlags flags)
     defaultViewConfig.recommendedSwapchainSampleCount = 1;
     defaultViewConfig.maxSwapchainSampleCount = 1;
 
-    // Initialzie stereo view
+    // Initialize stereo view
     MockViewConfiguration stereoViewConfig = {};
     stereoViewConfig.primary = true;
     stereoViewConfig.enabled = true;
@@ -90,6 +90,9 @@ MockRuntime::MockRuntime(XrInstance instance, MockRuntimeCreateFlags flags)
     // Add microsoft third person observer view if the extension is enabled
     if ((createFlags & (MR_CREATE_MSFT_THIRD_PERSON_OBSERVER_EXT | MR_CREATE_MSFT_SECONDARY_VIEW_CONFIGURATION_EXT)) == (MR_CREATE_MSFT_THIRD_PERSON_OBSERVER_EXT | MR_CREATE_MSFT_SECONDARY_VIEW_CONFIGURATION_EXT))
         MSFTThirdPersonObserver_Init();
+
+    if ((createFlags & MR_CREATE_META_PERFORMANCE_METRICS_EXT) == MR_CREATE_META_PERFORMANCE_METRICS_EXT)
+        MockMetaPerformanceMetrics::Init(*this, 4);
 
     // Generate the internal strings
     userPaths = {
@@ -1672,12 +1675,10 @@ XrResult MockRuntime::GetInstanceProcAddr(const char* name, PFN_xrVoidFunction* 
         return XR_SUCCESS;
 #endif
 
-#if defined(_WIN32)
-    if (XR_SUCCESS == MockWin32ConvertPerformanceCounterTime_GetInstanceProcAddr(name, function))
-        return XR_SUCCESS;
-#endif
-
     if (IsConformanceAutomationEnabled() && XR_SUCCESS == ConformanceAutomation_GetInstanceProcAddr(name, function))
+        return XR_SUCCESS;
+
+    if (MockMetaPerformanceMetrics::Instance() && XR_SUCCESS == MockMetaPerformanceMetrics_GetInstanceProcAddr(name, function))
         return XR_SUCCESS;
 
     return XR_ERROR_FUNCTION_UNSUPPORTED;

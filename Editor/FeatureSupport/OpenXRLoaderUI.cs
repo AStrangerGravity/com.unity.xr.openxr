@@ -38,6 +38,7 @@ namespace UnityEditor.XR.OpenXR.Features
 
         public string[] IncompatibleLoaders => new string[] {
             "UnityEngine.XR.WindowsMR.WindowsMRLoader",
+            "Unity.XR.Oculus.OculusLoader",
             };
 
         /// <inheritdoc/>

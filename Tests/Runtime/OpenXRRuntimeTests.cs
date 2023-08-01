@@ -33,7 +33,8 @@ namespace UnityEngine.XR.OpenXR.Tests
                 "XR_MSFT_secondary_view_configuration",
                 "XR_EXT_eye_gaze_interaction",
                 "XR_MSFT_hand_interaction",
-                "XR_MSFT_first_person_observer"
+                "XR_MSFT_first_person_observer",
+                "XR_META_performance_metrics"
             };
 
             foreach (string expectedExtension in expectedExtensions)
@@ -677,6 +678,29 @@ namespace UnityEngine.XR.OpenXR.Tests
             Assert.IsTrue(secondaryLayerCount == 0);
         }
 
+        [UnityTest]
+        public IEnumerator FirstPersonObserverInvalidSecondaryView()
+        {
+            AddExtension("XR_MSFT_secondary_view_configuration");
+            AddExtension("XR_MSFT_first_person_observer");
+            base.InitializeAndStart();
+
+            MockRuntime.ActivateSecondaryView(XrViewConfigurationType.SecondaryMonoFirstPersonObserver, true);
+
+            yield return new WaitForXrFrame(2);
+
+            MockRuntime.GetEndFrameStats(out var primaryLayerCount, out var secondaryLayerCount);
+            Assert.IsTrue(secondaryLayerCount == 1);
+
+            // make mock runtime return invalid state for xrWaitFrame to make sure we don't crash
+            MockRuntime.ActivateSecondaryView(0, false);
+
+            yield return new WaitForXrFrame(2);
+
+            MockRuntime.GetEndFrameStats(out primaryLayerCount, out secondaryLayerCount);
+            Assert.IsTrue(secondaryLayerCount == 0);
+        }
+
 
         [UnityTest]
         public IEnumerator ThirdPersonObserver()
@@ -811,6 +835,12 @@ namespace UnityEngine.XR.OpenXR.Tests
             Assert.IsTrue(OpenXRLoaderBase.Instance == null);
         }
 
+        /// <summary>
+        /// Simulates what can happen when trying to reconnect Link mode after a link disconnect, but
+        /// the headset is reporting a form factor unavailable error.
+        /// In this case, the app has already been started, and the runtime reports a form factor unavailable
+        /// error when trying to initialize xr again. What should happen is a restart loop to restart XR.
+        /// </summary>
         [UnityTest]
         public IEnumerator RestartLoopTest()
         {
@@ -830,6 +860,7 @@ namespace UnityEngine.XR.OpenXR.Tests
                 int resetAttempts = 0;
                 MockRuntime.SetFunctionCallback("xrGetSystem", (name) =>
                 {
+                    OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(true);
                     MockRuntime.KeepFunctionCallbacks = true;
                     resetAttempts += 1;
                     if (resetAttempts <= 2)
@@ -856,9 +887,13 @@ namespace UnityEngine.XR.OpenXR.Tests
                 MockRuntime.KeepFunctionCallbacks = initialKeepFunctionCallbacks;
                 MockRuntime.SetFunctionCallback("xrGetSystem", initialXRGetSystemCallback);
                 OpenXRRestarter.TimeBetweenRestartAttempts = initialTimeBetweenRestarts;
+                OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(false);
             }
         }
 
+        /// <summary>
+        /// Tests that OpenXRRuntime.wantsToRestart is a global switch for de-activating the restarting of XR.
+        /// </summary>
         [UnityTest]
         public IEnumerator RestartLoopDisabledTest()
         {
@@ -880,7 +915,11 @@ namespace UnityEngine.XR.OpenXR.Tests
                 OpenXRRestarter.TimeBetweenRestartAttempts = timeBetweenRestarts;
 
                 // Trigger initialize, which should throw the form factor unavailable error.
-                MockRuntime.SetFunctionCallback("xrGetSystem", (name) => XrResult.FormFactorUnavailable);
+                MockRuntime.SetFunctionCallback("xrGetSystem", (name) =>
+                {
+                    OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(true);
+                    return XrResult.FormFactorUnavailable;
+                });
                 base.InitializeAndStart();
 
                 // This retry attempt should not succeed since we manually set wantsToRestart = false.
@@ -893,6 +932,115 @@ namespace UnityEngine.XR.OpenXR.Tests
                 OpenXRRuntime.wantsToRestart -= () => false;
                 OpenXRRuntime.wantsToQuit -= () => true;
                 MockRuntime.SetFunctionCallback("xrGetSystem", initialXRGetSystemCallback);
+                OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(false);
+            }
+        }
+
+        /// <summary>
+        /// Simulates what happens when trying to initialize xr for the first time, and the headset is disconnected,
+        /// causing xrGetSystem to report a form factor unavailable error.
+        /// By default, xr initialization should not be retried per feedback from Microsoft.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator RestartLoopDisabledBeforeInitializationTest()
+        {
+            OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(false);
+            float initialTimeBetweenRestarts = OpenXRRestarter.TimeBetweenRestartAttempts;
+            var initialXRGetSystemCallback = MockRuntime.GetBeforeFunctionCallback("xrGetSystem");
+            try
+            {
+                float timeBetweenRestarts = 1.0f;
+
+                yield return null;
+
+                // Reduce the time between restarts to reduce the time of this test.
+                OpenXRRestarter.TimeBetweenRestartAttempts = timeBetweenRestarts;
+
+                // When XRGetSystem is called, start listening for a null OpenXRLoader since initialization has
+                // already started.
+                WaitForNullXRLoader nullLoaderYieldInstruction = new WaitForNullXRLoader();
+                MockRuntime.SetFunctionCallback("xrGetSystem", (name) =>
+                {
+                    Debug.Log("Calling XRGetSystem");
+                    nullLoaderYieldInstruction.StartListening();
+                    return XrResult.FormFactorUnavailable;
+                });
+
+                // Trigger initialize, which should throw the form factor unavailable error.
+                base.InitializeAndStart();
+
+                yield return nullLoaderYieldInstruction;
+                Assert.IsTrue(OpenXRLoader.Instance == null, "OpenXR should not be initialized");
+            }
+            finally
+            {
+                OpenXRRestarter.TimeBetweenRestartAttempts = initialTimeBetweenRestarts;
+                MockRuntime.SetFunctionCallback("xrGetSystem", initialXRGetSystemCallback);
+                OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(false);
+            }
+        }
+
+        /// <summary>
+        /// Simulates what happens when trying to initialize xr for the first time, and the runtime reports
+        /// a form factor unavailable error for xrGetSystem. If the user chooses, the runtime can retry initialization again and again
+        /// while waiting for the xrGetSystem call to succeed.
+        /// By default, xr initialization should not be retried per feedback from Microsoft. This loop needs to be
+        /// explicitly enabled.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator XRGetSystemLoopBeforeInitializationTest()
+        {
+            OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(false);
+            float initialTimeBetweenRestarts = OpenXRRestarter.TimeBetweenRestartAttempts;
+            bool initialKeepFunctionCallbacks = MockRuntime.KeepFunctionCallbacks;
+            var initialXRGetSystemCallback = MockRuntime.GetBeforeFunctionCallback("xrGetSystem");
+            bool initialRetryInitializationOnFormFactorErrors = OpenXRRuntime.retryInitializationOnFormFactorErrors;
+            try
+            {
+                yield return null;
+
+                // Enable this to prevent xrGetSystem callback override from getting overwritten.
+                MockRuntime.KeepFunctionCallbacks = true;
+
+                // Reduce the time between restarts to reduce the time of this test.
+                OpenXRRestarter.TimeBetweenRestartAttempts = 1.0f;
+
+                // Enable the xrGetSystem retry loop per this test.
+                OpenXRRuntime.retryInitializationOnFormFactorErrors = true;
+
+                // Enable this to ignore the error messages in the logs.
+                LogAssert.ignoreFailingMessages = true;
+
+                int resetAttempts = 0;
+                MockRuntime.SetFunctionCallback("xrGetSystem", (name) =>
+                {
+                    MockRuntime.KeepFunctionCallbacks = true;
+
+                    resetAttempts += 1;
+                    if (resetAttempts <= 2)
+                    {
+                        return XrResult.FormFactorUnavailable;
+                    }
+                    else
+                    {
+                        return XrResult.Success;
+                    }
+                });
+
+                // Trigger initialize, which should call into xrGetSystem.
+                base.InitializeAndStart();
+
+                yield return new WaitForLoaderRestart(10, true);
+                Assert.AreEqual(3, resetAttempts);
+                Assert.IsTrue(OpenXRLoader.Instance != null, "OpenXR should be initialized");
+            }
+            finally
+            {
+                MockRuntime.KeepFunctionCallbacks = initialKeepFunctionCallbacks;
+                OpenXRRuntime.retryInitializationOnFormFactorErrors = initialRetryInitializationOnFormFactorErrors;
+                OpenXRRestarter.TimeBetweenRestartAttempts = initialTimeBetweenRestarts;
+                MockRuntime.SetFunctionCallback("xrGetSystem", initialXRGetSystemCallback);
+                OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(false);
             }
         }
 
@@ -1007,9 +1155,15 @@ namespace UnityEngine.XR.OpenXR.Tests
             Assert.IsTrue(OpenXRLoader.Instance == null, "OpenXR should not be initialized");
         }
 
+        /// <summary>
+        /// Simulates what can happen when trying to reconnect Link mode after a link disconnect. During
+        /// xr re-initialization, creating the swapchain can result in a session lost error, which should trigger a
+        /// loop to attempt to restart xr.
+        /// </summary>
         [UnityTest]
         public IEnumerator CreateSwapChainSessionLostError()
         {
+            OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(true);
             float initialTimeBetweenRestarts = OpenXRRestarter.TimeBetweenRestartAttempts;
             var initialXRCreateSwapchainCallback = MockRuntime.GetBeforeFunctionCallback("xrCreateSwapchain");
             try
@@ -1020,7 +1174,6 @@ namespace UnityEngine.XR.OpenXR.Tests
                 OpenXRRestarter.TimeBetweenRestartAttempts = timeBetweenRestarts;
 
                 MockRuntime.SetFunctionCallback("xrCreateSwapchain", (func) => XrResult.SessionLost);
-                LogAssert.Expect(LogType.Log, "OpenXRLoader restart successful.");
                 InitializeAndStart();
 
                 yield return new WaitForLoaderRestart(10, true);
@@ -1031,6 +1184,7 @@ namespace UnityEngine.XR.OpenXR.Tests
             {
                 OpenXRRestarter.TimeBetweenRestartAttempts = initialTimeBetweenRestarts;
                 MockRuntime.SetFunctionCallback("xrCreateSwapchain", initialXRCreateSwapchainCallback);
+                OpenXRLoaderBase.Internal_SetSuccessfullyInitialized(false);
             }
         }
 

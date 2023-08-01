@@ -65,7 +65,12 @@ namespace UnityEditor.XR.OpenXR
 
                             return manager.activeLoaders.OfType<OpenXRLoader>().Any();
                         })
+#if UNITY_2023_1_OR_NEWER
+                        .Any(buildTarget => PlayerSettings.GetGraphicsAPIs(buildTarget).Any(g => g == GraphicsDeviceType.OpenGLES3));
+#else
+                        // Keeping OpenGL ES 2 support for 2022 and older versions.
                         .Any(buildTarget => PlayerSettings.GetGraphicsAPIs(buildTarget).Any(g => g == GraphicsDeviceType.OpenGLES2 || g == GraphicsDeviceType.OpenGLES3));
+#endif
                 },
                 fixIt = () => PlayerSettings.colorSpace = ColorSpace.Linear,
                 fixItMessage = "Set PlayerSettings.colorSpace to ColorSpace.Linear",
@@ -162,9 +167,46 @@ namespace UnityEditor.XR.OpenXR
                 error = true,
                 errorEnteringPlaymode = true,
             },
+            new OpenXRFeature.ValidationRule()
+            {
+                message = "[Optional] Switch to use InputSystem.XR.PoseControl instead of OpenXR.Input.PoseControl, which will be deprecated in a future release.",
+                checkPredicate = () =>
+                {
+#if !USE_INPUT_SYSTEM_POSE_CONTROL && INPUT_SYSTEM_POSE_VALID
+                    return false;
+#else
+                    return true;
+#endif
+                },
+                fixIt = EnableInputSystemPoseControlDefine,
+                error = false,
+                errorEnteringPlaymode = false,
+            }
         };
 
         private static readonly List<OpenXRFeature.ValidationRule> CachedValidationList = new List<OpenXRFeature.ValidationRule>(BuiltinValidationRules.Length);
+
+        internal static void EnableInputSystemPoseControlDefine()
+        {
+#if UNITY_2021_3_OR_NEWER
+            NamedBuildTarget[] targets = {NamedBuildTarget.Android, NamedBuildTarget.Standalone, NamedBuildTarget.WindowsStoreApps};
+            for (var index = 0; index < targets.Length; index++)
+            {
+                var defines = PlayerSettings.GetScriptingDefineSymbols(targets[index]);
+                defines += ";USE_INPUT_SYSTEM_POSE_CONTROL";
+                PlayerSettings.SetScriptingDefineSymbols(targets[index], defines);
+            }
+
+#else
+            BuildTargetGroup[] buildTargets = {BuildTargetGroup.Android, BuildTargetGroup.Standalone, BuildTargetGroup.WSA};
+            for (var index = 0; index < buildTargets.Length; index++)
+            {
+                var defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(buildTargets[index]);
+                defines += ";USE_INPUT_SYSTEM_POSE_CONTROL";
+                PlayerSettings.SetScriptingDefineSymbolsForGroup(buildTargets[index], defines);
+            }
+#endif
+        }
 
         internal static bool AssetHasNoDuplicates()
         {

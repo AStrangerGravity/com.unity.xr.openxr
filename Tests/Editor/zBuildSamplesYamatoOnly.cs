@@ -48,14 +48,14 @@ class zBuildSamplesYamatoOnly
     {
         foreach (var feature in OpenXRSettings.ActiveBuildTargetInstance.features)
         {
-            if (feature.nameUi.Contains("Oculus Quest"))
+            if (feature.nameUi.Contains("Meta Quest"))
             {
                 Console.WriteLine($"Enable: {feature.nameUi}");
                 feature.enabled = true;
                 return;
             }
         }
-        Assert.IsTrue(false, "Could not enable oculus quest extension - if you're not on build machine you must copy dir OculusQuest to your project.");
+        Assert.IsTrue(false, "Could not enable meta quest extension - if you're not on build machine you must copy dir MetaQuest to your project.");
     }
 
     static void EnableMSFTObserverFeature()
@@ -214,7 +214,7 @@ class zBuildSamplesYamatoOnly
 #endif
         new SampleBuildTargetSetup
         {
-            sampleRegex = new Regex(".*Render.*"), // Only build vulkan variant for Render Samples
+            sampleRegex = new Regex(".*RenderSample.*|.*MetaSample.*"), // Only build vulkan variant for Render Samples
             buildTarget = BuildTarget.Android,
             targetGroup = BuildTargetGroup.Android,
             setupPlayerSettings = (outputFile, identifier) =>
@@ -237,6 +237,7 @@ class zBuildSamplesYamatoOnly
         },
         new SampleBuildTargetSetup
         {
+            sampleRegex = new Regex("^(?!.*MetaSample).*$"), // Don't build the Meta Sample for GLES
             buildTarget = BuildTarget.Android,
             targetGroup = BuildTargetGroup.Android,
             setupPlayerSettings = (outputFile, identifier) =>
